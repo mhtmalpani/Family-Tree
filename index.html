@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Family Tree Builder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html-to-image/1.11.11/html-to-image.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
+  <style type="text/tailwindcss">
+    @layer components {
+      .btn {
+        @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50;
+      }
+      .btn-sm { @apply h-8 rounded-md px-3 text-xs; }
+      .btn-default { @apply h-9 px-4 py-2; }
+      .btn-icon { @apply h-9 w-9 px-0; }
+      .btn-primary { @apply bg-slate-900 text-slate-50 hover:bg-slate-900/90; }
+      .btn-secondary { @apply bg-slate-100 text-slate-900 hover:bg-slate-100/80; }
+      .btn-outline { @apply border border-slate-200 bg-white hover:bg-slate-100 hover:text-slate-900; }
+      .btn-ghost { @apply hover:bg-slate-100 hover:text-slate-900; }
+      .btn-destructive { @apply bg-red-500 text-slate-50 hover:bg-red-500/90; }
+      .btn-destructive-ghost { @apply text-red-500 hover:bg-red-50 hover:text-red-600; }
+      
+      .input-field {
+        @apply flex h-9 w-full rounded-md border border-slate-200 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-slate-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-slate-950 disabled:cursor-not-allowed disabled:opacity-50;
+      }
+      .label-text {
+        @apply text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-slate-900 mb-2 block;
+      }
+    }
+  </style>
+  <style>
+    body { font-family: 'Inter', sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; background-color: #f8fafc; }
+    #canvas-container { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; overflow: hidden; cursor: grab; background: radial-gradient(circle, #e2e8f0 1px, transparent 1px); background-size: 24px 24px; }
+    #canvas-container:active { cursor: grabbing; }
+    #canvas-inner { position: absolute; top: 0; left: 0; width: 40000px; height: 40000px; transform-origin: 0 0; }
+    #canvas-inner.smooth { transition: transform 0.25s cubic-bezier(0.25,0.1,0.25,1); }
+    #lines-svg { position: absolute; top: 0; left: 0; width: 40000px; height: 40000px; pointer-events: none; z-index: 1; }
+    
+    /* Line styles */
+    .partner-line { stroke: #94a3b8; stroke-width: 2; stroke-dasharray: 6 4; opacity: 0.8; stroke-linecap: round; }
+    .parent-line { stroke: #94a3b8; stroke-width: 2; opacity: 0.8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    
+    /* Edge toggle */
+    .edge-toggle-circle { pointer-events: all; cursor: pointer; fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; transition: all 0.2s ease; }
+    .edge-toggle-circle:hover { stroke: #0f172a; fill: #f8fafc; stroke-width: 2; }
+    .edge-toggle-text { pointer-events: none; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600; fill: #64748b; text-anchor: middle; dominant-baseline: central; }
+    
+    /* Person Card container strictly for JS positioning */
+    .person-card { position: absolute; z-index: 10; width: 200px; height: 320px; cursor: pointer; pointer-events: auto; }
+    .person-card:hover { z-index: 20; }
+    .person-card.selected { 
+      z-index: 25; 
+      --tw-ring-color: #6366f1; 
+      --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color);
+      box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+      transform: scale(1.02);
+    }
+
+    /* Side Panel transition */
+    #side-panel { transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+    #side-panel.open { transform: translateX(0); }
+    #side-panel:not(.open) { transform: translateX(100%); }
+    
+    /* Custom scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div id="toolbar" class="fixed top-0 left-0 right-0 h-14 bg-white/80 backdrop-blur-md border-b border-slate-200 z-[100] flex items-center px-4 gap-1.5 overflow-x-auto whitespace-nowrap">
+    <div class="font-bold text-lg text-slate-900 tracking-tight mr-4 flex items-center gap-2">
+      <svg class="w-5 h-5 text-slate-900" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM9 18a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 10v4h4v-4M7 10h10M12 14v4"></path></svg>
+      FamilyTree
+    </div>
+    <div class="w-px h-6 bg-slate-200 mx-1 shrink-0"></div>
+    <button onclick="addRootPerson()" class="btn btn-default btn-primary">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg> Add Person
+    </button>
+    <div class="flex items-center bg-slate-100 rounded-md p-0.5 ml-2 border border-slate-200/50">
+      <button onclick="zoomOut()" class="inline-flex items-center justify-center rounded-sm text-sm font-medium transition-all hover:bg-white hover:text-slate-900 hover:shadow-sm h-7 w-7 text-slate-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM7 10h6"></path></svg></button>
+      <span id="zoom-indicator" class="text-xs font-semibold text-slate-700 min-w-[3rem] text-center">100%</span>
+      <button onclick="zoomIn()" class="inline-flex items-center justify-center rounded-sm text-sm font-medium transition-all hover:bg-white hover:text-slate-900 hover:shadow-sm h-7 w-7 text-slate-600"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg></button>
+    </div>
+    <button onclick="fitToScreen()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg> Fit
+    </button>
+    <button onclick="resetView()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path></svg> Reset
+    </button>
+    <button onclick="autoAlignTree()" class="btn btn-default btn-secondary">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg> Auto Align
+    </button>
+    <div class="w-px h-6 bg-slate-200 mx-1 shrink-0"></div>
+    <button onclick="expandAll()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg> Expand All
+    </button>
+    <button onclick="collapseAll()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg> Collapse All
+    </button>
+    <div class="w-px h-6 bg-slate-200 mx-1 shrink-0"></div>
+    <button onclick="exportJSON()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Export
+    </button>
+    <button onclick="document.getElementById('import-file-input').click()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg> Import
+    </button>
+    <input type="file" id="import-file-input" accept=".json" onchange="importJSON(event)" class="hidden">
+    <button onclick="exportImage()" class="btn btn-default btn-ghost text-slate-600">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg> Export Image
+    </button>
+    <div class="w-px h-6 bg-slate-200 mx-1 shrink-0"></div>
+    <button class="btn btn-default btn-destructive-ghost" onclick="clearAll()">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg> Clear
+    </button>
+  </div>
+
+  <div id="canvas-container">
+    <div id="canvas-inner">
+      <svg id="lines-svg"></svg>
+    </div>
+  </div>
+
+  <div id="side-panel" class="fixed right-0 top-[56px] bottom-0 w-full max-w-sm bg-white shadow-xl z-[90] flex flex-col border-l border-slate-200 sm:max-w-md">
+    <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-white/80 backdrop-blur sticky top-0 z-10">
+      <h3 id="panel-title" class="font-semibold text-slate-900 text-lg tracking-tight">Edit Person</h3>
+      <button onclick="closePanel()" class="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors hover:bg-slate-100 hover:text-slate-900 h-9 w-9 text-slate-500" title="Close panel">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+    <div class="p-6 flex flex-col gap-4 flex-1 overflow-y-auto" id="panel-body"></div>
+  </div>
+  
+  <div id="toast" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 translate-y-20 opacity-0 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-lg font-medium text-sm z-[200] transition-all duration-300 pointer-events-none flex items-center gap-2"></div>
+
+  <script>
+    (function() {
+      const CARD_W = 200, CARD_H = 320, H_GAP = 50, V_GAP = 80;
+      let people = {}, nextId = 1, selectedPersonId = null;
+      let collapsedEdges = new Set();
+      let scale = 1, panX = 0, panY = 0, isPanning = false, panStart = { x:0, y:0 }, panStartPan = { x:0, y:0 };
+      let currentLayout = { positions:{}, connections:[], generation:{} };
+
+      const canvasContainer = document.getElementById('canvas-container');
+      const canvasInner = document.getElementById('canvas-inner');
+      const linesSvg = document.getElementById('lines-svg');
+      const sidePanel = document.getElementById('side-panel');
+      const panelBody = document.getElementById('panel-body');
+      const panelTitle = document.getElementById('panel-title');
+      const toast = document.getElementById('toast');
+      const zoomIndicator = document.getElementById('zoom-indicator');
+
+      function sortIds(ids) {
+        return ids.sort((a,b) => parseInt(a.slice(2)) - parseInt(b.slice(2)));
+      }
+
+      function parentKey(parentIds) {
+        return sortIds([...parentIds].filter(id => people[id])).join('-');
+      }
+
+      function genId() { return 'p_' + (nextId++); }
+      function showToast(msg) {
+        toast.innerHTML = `<svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> <span>${msg}</span>`;
+        toast.style.opacity = '1';
+        toast.style.transform = 'translate(-50%, 0)';
+        clearTimeout(toast._timeout); 
+        toast._timeout = setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translate(-50%, 20px)';
+        }, 2500);
+      }
+      function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+      function normalizeImageUrl(url) {
+        if (!url) return '';
+        url = url.trim();
+        // Pattern 1: https://drive.google.com/file/d/FILE_ID/view...
+        let match = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+        if (match) return `https://lh3.googleusercontent.com/d/${match[1]}`;
+        // Pattern 2: https://drive.google.com/open?id=FILE_ID
+        match = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+        if (match) return `https://lh3.googleusercontent.com/d/${match[1]}`;
+        // Pattern 3: https://drive.google.com/uc?id=FILE_ID&export=...
+        match = url.match(/drive\.google\.com\/uc\?.*id=([a-zA-Z0-9_-]+)/);
+        if (match) return `https://lh3.googleusercontent.com/d/${match[1]}`;
+        // Already a lh3 link? pass through
+        if (url.includes('lh3.googleusercontent.com')) return url;
+        // Any other URL — return as-is
+        return url;
+      }
+
+      function isGoogleDriveUrl(url) {
+        if (!url) return false;
+        return /drive\.google\.com\/(file\/d\/|open\?id=|uc\?)/.test(url.trim());
+      }
+      
+      function formatDate(dateString) {
+        if (!dateString) return '';
+        const [y, m, d] = dateString.split('-');
+        if (y && m && d) {
+          const date = new Date(y, m - 1, d);
+          return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        }
+        return dateString;
+      }
+
+      function toTitleCase(str) {
+        if (!str) return '';
+        return str.trim().replace(/\b\w/g, c => c.toUpperCase());
+      }
+
+      function createPerson(data={}) {
+        const id = data.id || genId();
+        const p = {
+          id, firstName: data.firstName || '', lastName: data.lastName || '', maidenName: data.maidenName || '', nickname: data.nickname || '',
+          dateOfBirth: data.dateOfBirth || '', isDeceased: data.isDeceased || false, dateOfDeath: data.dateOfDeath || '', gender: data.gender || 'other', profession: data.profession || '',
+          city: data.city || '', country: data.country || '',
+          imageUrl: data.imageUrl || '', partnerIds: data.partnerIds || [], parentIds: data.parentIds || [], childIds: data.childIds || []
+        };
+        people[id] = p;
+        return p;
+      }
+
+      function removePerson(id) {
+        const p = people[id]; if (!p) return;
+        for (const pid of p.partnerIds) if (people[pid]) people[pid].partnerIds = people[pid].partnerIds.filter(x => x !== id);
+        for (const pid of p.parentIds) if (people[pid]) people[pid].childIds = people[pid].childIds.filter(x => x !== id);
+        for (const cid of p.childIds) if (people[cid]) people[cid].parentIds = people[cid].parentIds.filter(x => x !== id);
+        delete people[id];
+      }
+
+      function addPartnerRelationship(a, b) {
+        if (a===b || !people[a] || !people[b]) return;
+        if (!people[a].partnerIds.includes(b)) people[a].partnerIds.push(b);
+        if (!people[b].partnerIds.includes(a)) people[b].partnerIds.push(a);
+      }
+
+      function addChildToParents(childId, parentIds) {
+        const valid = parentIds.filter(pid => people[pid]);
+        if (valid.length===0 || !people[childId]) return;
+        for (const pid of valid) {
+          if (!people[pid].childIds.includes(childId)) people[pid].childIds.push(childId);
+          if (!people[childId].parentIds.includes(pid)) people[childId].parentIds.push(pid);
+        }
+        if (valid.length===2) addPartnerRelationship(valid[0], valid[1]);
+      }
+
+      // get all parent-set keys that have children (regardless of collapse)
+      function getAllParentKeys() {
+        const keys = new Set();
+        for (const id in people) {
+          const p = people[id];
+          for (const cid of p.childIds) {
+            if (!people[cid]) continue;
+            const pids = sortIds(people[cid].parentIds.filter(pid => people[pid]));
+            if (pids.length) keys.add(pids.join('-'));
+          }
+        }
+        return [...keys];
+      }
+
+      // recursively get descendant edge keys for a given parent key
+      function getDescendantEdgeKeys(parentKeyStr) {
+        const result = new Set();
+        const parentIds = parentKeyStr.split('-').filter(pid => people[pid]);
+        const children = new Set();
+        for (const pid of parentIds) {
+          for (const cid of people[pid].childIds) {
+            if (people[cid] && parentKey(people[cid].parentIds.filter(p => people[p])) === parentKeyStr) {
+              children.add(cid);
+            }
+          }
+        }
+        const childKeys = new Set();
+        for (const cid of children) {
+          const childPids = people[cid].childIds.filter(c => people[c]);
+          for (const gcid of people[cid].childIds) {
+            if (!people[gcid]) continue;
+            const gpids = sortIds(people[gcid].parentIds.filter(p => people[p]));
+            if (gpids.length) childKeys.add(gpids.join('-'));
+          }
+        }
+        for (const ck of childKeys) {
+          result.add(ck);
+          for (const dk of getDescendantEdgeKeys(ck)) result.add(dk);
+        }
+        return result;
+      }
+
+      // toggle an edge: collapse/expand, and when collapsing, recursively collapse all descendants
+      function toggleEdge(key) {
+        if (collapsedEdges.has(key)) {
+          // expanding this edge: remove it from collapsedEdges, descendants remain as they were
+          collapsedEdges.delete(key);
+        } else {
+          // collapsing: add this key and all descendant keys
+          collapsedEdges.add(key);
+          const descendants = getDescendantEdgeKeys(key);
+          for (const dk of descendants) collapsedEdges.add(dk);
+        }
+        renderAll();
+      }
+
+      function getVisibleIds() {
+        const visible = new Set();
+        const allIds = Object.keys(people);
+        
+        // 1. Group people into Partner Clusters
+        const visitedCluster = new Set();
+        const roots = [];
+        
+        for (const id of allIds) {
+          if (visitedCluster.has(id)) continue;
+          
+          const cluster = new Set();
+          const q = [id];
+          visitedCluster.add(id);
+          
+          while (q.length) {
+            const curr = q.shift();
+            cluster.add(curr);
+            const p = people[curr];
+            if (p) {
+              for (const pid of p.partnerIds) {
+                if (people[pid] && !visitedCluster.has(pid)) {
+                  visitedCluster.add(pid);
+                  q.push(pid);
+                }
+              }
+            }
+          }
+          
+          // 2. Identify Root Clusters (clusters where NO ONE has a parent)
+          let hasParent = false;
+          for (const cid of cluster) {
+            const cp = people[cid];
+            if (cp && cp.parentIds.filter(pid => people[pid]).length > 0) {
+              hasParent = true;
+              break;
+            }
+          }
+          if (!hasParent) {
+            roots.push(...cluster);
+          }
+        }
+        
+        // Fallback for isolated cyclical graphs (extremely rare but prevents complete failure)
+        if (roots.length === 0 && allIds.length > 0) roots.push(allIds[0]);
+
+        // 3. Traverse from roots to find all visible nodes
+        const queue = [...roots];
+        const visited = new Set();
+        
+        while (queue.length) {
+          const cur = queue.shift();
+          if (visited.has(cur)) continue;
+          visited.add(cur);
+          visible.add(cur);
+          
+          const p = people[cur];
+          if (!p) continue;
+          
+          // Partners are always visible if one is visible
+          for (const pid of p.partnerIds) {
+            if (people[pid] && !visited.has(pid)) {
+              queue.push(pid);
+            }
+          }
+          
+          // Children are only visible if the edge is not collapsed
+          for (const cid of p.childIds) {
+            if (!people[cid] || visited.has(cid)) continue;
+            const pids = sortIds(people[cid].parentIds.filter(pid => people[pid]));
+            const key = pids.join('-');
+            if (!collapsedEdges.has(key)) {
+              queue.push(cid);
+            }
+          }
+        }
+        
+        return visible;
+      }
+
+      function computeLayout() {
+        const visibleIds = getVisibleIds();
+        if (visibleIds.size === 0) return { positions:{}, connections:[], generation:{} };
+
+        const allIds = [...visibleIds];
+        const generation = {};
+        const visited = new Set();
+        const queue = [];
+        for (const id of allIds) {
+          if (people[id].parentIds.filter(pid => visibleIds.has(pid)).length === 0) {
+            generation[id] = 0; queue.push(id); visited.add(id);
+          }
+        }
+        if (queue.length===0 && allIds.length>0) { generation[allIds[0]]=0; queue.push(allIds[0]); visited.add(allIds[0]); }
+        while (queue.length) {
+          const curr = queue.shift();
+          for (const cid of people[curr].childIds) {
+            if (!visibleIds.has(cid)) continue;
+            const newGen = (generation[curr]||0) + 1;
+            if (!visited.has(cid)) { generation[cid] = newGen; visited.add(cid); queue.push(cid); }
+            else generation[cid] = Math.max(generation[cid], newGen);
+          }
+        }
+        for (const id of allIds) if (!(id in generation)) generation[id] = 0;
+        let changed = true, iters = 0;
+        while (changed && iters<15) { changed=false; iters++;
+          for (const id of allIds) {
+            for (const pid of people[id].partnerIds) {
+              if (visibleIds.has(pid) && generation[id] !== generation[pid]) {
+                const maxGen = Math.max(generation[id], generation[pid]);
+                generation[id] = maxGen; generation[pid] = maxGen; changed = true;
+              }
+            }
+          }
+          for (const id of allIds) {
+            const parentGens = people[id].parentIds.filter(pid=>visibleIds.has(pid)).map(pid=>generation[pid]||0);
+            if (parentGens.length && generation[id] <= Math.max(...parentGens)) {
+              generation[id] = Math.max(...parentGens)+1; changed = true;
+            }
+          }
+        }
+        const minGen = Math.min(...Object.values(generation));
+        for (const id of allIds) generation[id] -= minGen;
+
+        const clusterMap = {};
+        const clusters = {};
+        for (const id of allIds) {
+          if (clusterMap[id]) continue;
+          const gen = generation[id];
+          const memberSet = new Set();
+          const stack = [id];
+          while (stack.length) {
+            const cur = stack.pop();
+            if (memberSet.has(cur)) continue;
+            memberSet.add(cur);
+            for (const pid of people[cur].partnerIds) {
+              if (visibleIds.has(pid) && generation[pid]===gen && !memberSet.has(pid)) stack.push(pid);
+            }
+          }
+          const members = sortIds([...memberSet]);
+          const cid = members.join('-');
+          clusters[cid] = { members: new Set(members), gen };
+          for (const m of members) clusterMap[m] = cid;
+        }
+
+        const parentSetToChildren = {};
+        for (const id of allIds) {
+          const pids = sortIds(people[id].parentIds.filter(pid=>visibleIds.has(pid)));
+          if (pids.length) {
+            const key = pids.join('-');
+            (parentSetToChildren[key] = parentSetToChildren[key] || []).push(id);
+          }
+        }
+        
+        for (const key of Object.keys(parentSetToChildren)) {
+          const pid = key.split('-')[0];
+          if (people[pid] && people[pid].childIds) {
+            const ordered = people[pid].childIds.map(String);
+            parentSetToChildren[key].sort((a, b) => {
+              const idxA = ordered.indexOf(String(a));
+              const idxB = ordered.indexOf(String(b));
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              return 0;
+            });
+          }
+        }
+
+        const positions = {};
+        const connections = [];
+        const rootClusters = Object.values(clusters).filter(c => {
+          for (const m of c.members) if (people[m].parentIds.some(pid=>visibleIds.has(pid))) return false;
+          return true;
+        }).map(c => sortIds([...c.members]).join('-')).sort((a,b) => parseInt(a.split('-')[0].slice(2)) - parseInt(b.split('-')[0].slice(2)));
+
+        function layoutCluster(clusterId, startX, y) {
+          const cl = clusters[clusterId];
+          if (!cl) return { width: 0 };
+          const memberList = [...cl.members];
+          const ownWidth = memberList.length * (CARD_W + H_GAP) - H_GAP;
+          const childGroupKeys = new Set();
+          for (const m of memberList) {
+            for (const cid of people[m].childIds) {
+              if (!visibleIds.has(cid)) continue;
+              const pids = sortIds(people[cid].parentIds.filter(p=>visibleIds.has(p))).join('-');
+              if (pids && parentSetToChildren[pids]) childGroupKeys.add(pids);
+            }
+          }
+          let childrenTotalWidth = 0;
+          const childLayouts = [];
+          for (const key of childGroupKeys) {
+            const children = parentSetToChildren[key] || [];
+            const childClusters = new Map();
+            for (const cid of children) {
+              const ccId = clusterMap[cid];
+              if (!ccId) continue;
+              if (!childClusters.has(ccId)) childClusters.set(ccId, []);
+              childClusters.get(ccId).push(cid);
+            }
+            let groupWidth = 0;
+            const groupLayouts = [];
+            for (const [ccId, cids] of childClusters) {
+              const sub = layoutCluster(ccId, 0, 0);
+              groupLayouts.push({ ccId, width: sub.width, cids });
+              groupWidth += sub.width + H_GAP;
+            }
+            if (groupWidth > 0) groupWidth -= H_GAP;
+            childrenTotalWidth += groupWidth + H_GAP*2;
+            childLayouts.push({ key, groupLayouts, width: groupWidth });
+          }
+          if (childrenTotalWidth > 0) childrenTotalWidth -= H_GAP*2;
+          const totalWidth = Math.max(ownWidth, childrenTotalWidth);
+          const centerX = startX + totalWidth/2;
+          const memberStartX = centerX - ownWidth/2;
+          for (let i=0; i<memberList.length; i++) {
+            positions[memberList[i]] = { x: memberStartX + i*(CARD_W+H_GAP), y };
+          }
+          let childX = centerX - childrenTotalWidth/2;
+          const childY = y + CARD_H + V_GAP;
+          for (const group of childLayouts) {
+            let innerX = childX;
+            for (const sub of group.groupLayouts) {
+              layoutCluster(sub.ccId, innerX, childY);
+              innerX += sub.width + H_GAP;
+            }
+            childX += group.width + H_GAP*2;
+          }
+          for (const m of memberList) {
+            for (const pid of people[m].partnerIds) {
+              if (pid > m && cl.members.has(pid) && visibleIds.has(pid)) {
+                connections.push({ type:'partner', from:m, to:pid });
+              }
+            }
+          }
+          for (const key of childGroupKeys) {
+            const parentIds = key.split('-').filter(pid=>visibleIds.has(pid));
+            const children = parentSetToChildren[key] || [];
+            if (parentIds.length && children.length) {
+              connections.push({ type:'parent-child', parentIds, childIds: children });
+            }
+          }
+          return { width: totalWidth };
+        }
+
+        let globalX = 0;
+        for (const cid of rootClusters) {
+          const cl = clusters[cid];
+          if (!cl) continue;
+          const { width } = layoutCluster(cid, globalX, 0);
+          globalX += width + H_GAP*3;
+        }
+        return { positions, connections, generation };
+      }
+
+      function renderAll() {
+        const oldPos = selectedPersonId && currentLayout.positions ? currentLayout.positions[selectedPersonId] : null;
+        currentLayout = computeLayout();
+        const newPos = selectedPersonId && currentLayout.positions ? currentLayout.positions[selectedPersonId] : null;
+        if (oldPos && newPos) {
+          panX -= (newPos.x - oldPos.x) * scale;
+          panY -= (newPos.y - oldPos.y) * scale;
+        }
+        renderCards();
+        renderLines();
+        updateZoomIndicator();
+        saveToLocalStorage();
+      }
+
+      function renderCards() {
+        canvasInner.querySelectorAll('.person-card').forEach(c => c.remove());
+        for (const [id, pos] of Object.entries(currentLayout.positions)) {
+          const p = people[id]; if (!p) continue;
+          const card = document.createElement('div');
+          const isSelected = id === selectedPersonId;
+          const genderRing = p.gender === 'male' ? 'ring-blue-100 shadow-blue-900/5' : p.gender === 'female' ? 'ring-pink-100 shadow-pink-900/5' : 'ring-slate-200';
+          card.className = `person-card flex flex-col bg-white rounded-xl shadow-sm transition-all duration-200 overflow-hidden ring-1 ${genderRing} group`;
+          if (isSelected) card.classList.add('selected');
+          card.dataset.personId = id;
+          card.style.left = pos.x+'px'; card.style.top = pos.y+'px';
+          
+          const gl = p.gender==='male'?'Male':p.gender==='female'?'Female':'Other';
+          const name = [p.firstName, p.lastName].filter(Boolean).join(' ') || 'Unnamed';
+          
+          const dob = p.dateOfBirth ? formatDate(p.dateOfBirth) : '';
+          const dod = p.dateOfDeath ? formatDate(p.dateOfDeath) : '';
+          let dateStr = '';
+          if (p.isDeceased) {
+            if (dob && dod) dateStr = `${dob} - ${dod}`;
+            else if (dob) dateStr = `${dob} - Deceased`;
+            else if (dod) dateStr = `Deceased: ${dod}`;
+            else dateStr = 'Deceased';
+          } else {
+            dateStr = dob;
+          }
+          
+          const topBg = p.gender === 'male' ? 'bg-blue-50/80 border-blue-100/50' : p.gender === 'female' ? 'bg-pink-50/80 border-pink-100/50' : 'bg-slate-100/50 border-slate-100';
+          const iconColor = p.gender === 'male' ? 'text-blue-200' : p.gender === 'female' ? 'text-pink-200' : 'text-slate-300';
+          const badgeClass = p.gender === 'male' ? 'bg-blue-50/90 text-blue-700 border-blue-200/60' : p.gender === 'female' ? 'bg-pink-50/90 text-pink-700 border-pink-200/60' : 'bg-white/90 text-slate-700 border-slate-200/50';
+
+          card.innerHTML = `
+            <div class="w-full h-[180px] ${topBg} flex items-center justify-center overflow-hidden relative shrink-0 border-b">
+              ${p.imageUrl ? `<img src="${escapeHtml(normalizeImageUrl(p.imageUrl))}" class="w-full h-full object-cover object-center" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">` : ''}
+              <div class="${iconColor} flex items-center justify-center w-full h-full ${p.imageUrl?'hidden':''}">
+                <svg class="w-12 h-12" fill="currentColor" viewBox="0 0 24 24"><path d="M24 20.993V24H0v-2.996A14.977 14.977 0 0112.004 15c4.904 0 9.26 2.354 11.996 5.993zM16.002 8.999a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+              </div>
+              <div class="absolute top-2 right-2 flex gap-1 z-[2]">
+                 <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium backdrop-blur-sm shadow-sm border ${badgeClass}">
+                    ${gl}
+                 </span>
+              </div>
+            </div>
+            <div class="p-3.5 flex flex-col flex-1 w-full overflow-hidden bg-white">
+              <div class="font-semibold text-sm text-slate-900 w-full truncate mb-0.5 tracking-tight" title="${escapeHtml(name)}${p.nickname ? ' (' + escapeHtml(p.nickname) + ')' : ''}">${escapeHtml(name)}${p.nickname ? ` <span class="font-normal text-slate-500">(${escapeHtml(p.nickname)})</span>` : ''}</div>
+              <div class="text-[11px] text-slate-500 w-full truncate leading-tight h-[16px]">${p.maidenName ? `née ${escapeHtml(p.maidenName)}` : ''}</div>
+              <div class="mt-auto pt-2 flex flex-col gap-1.5 w-full">
+                <div class="text-[11px] text-slate-500 flex items-center gap-1.5 w-full truncate h-[16px] ${p.city || p.country ? '' : 'invisible'}">
+                  <svg class="w-3 h-3 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg> 
+                  <span class="truncate">${p.city || p.country ? escapeHtml([p.city, p.country].filter(Boolean).join(', ')) : ''}</span>
+                </div>
+                <div class="text-[11px] text-slate-500 flex items-center gap-1.5 w-full truncate h-[16px] ${dateStr ? '' : 'invisible'}">
+                  <svg class="w-3 h-3 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg> 
+                  <span class="truncate" title="${escapeHtml(dateStr)}">${escapeHtml(dateStr)}</span>
+                </div>
+                <div class="text-[11px] text-slate-500 flex items-start gap-1.5 w-full ${p.profession ? '' : 'invisible'}">
+                  <svg class="w-3 h-3 text-slate-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg> 
+                  <span class="line-clamp-2 leading-tight" title="${escapeHtml(p.profession || '')}">${p.profession ? escapeHtml(p.profession) : ''}</span>
+                </div>
+              </div>
+            </div>`;
+          card.addEventListener('click', e => { e.stopPropagation(); selectPerson(id); });
+          card.addEventListener('dblclick', e => { e.stopPropagation(); selectPerson(id); openEditPanel(id); });
+          canvasInner.appendChild(card);
+        }
+      }
+
+      function renderLines() {
+        linesSvg.innerHTML = '';
+        const svgNs = 'http://www.w3.org/2000/svg';
+        const line = (x1,y1,x2,y2,cls) => { const l=document.createElementNS(svgNs,'line'); l.setAttribute('x1',x1); l.setAttribute('y1',y1); l.setAttribute('x2',x2); l.setAttribute('y2',y2); l.setAttribute('class',cls); return l; };
+        const path = (d,cls) => { const p=document.createElementNS(svgNs,'path'); p.setAttribute('d',d); p.setAttribute('class',cls); return p; };
+
+        // Collect toggle positions for all parent keys that have children
+        const allParentKeys = getAllParentKeys();
+        const togglePositions = new Map();
+
+        // Draw actual connections (only for visible children)
+        for (const conn of currentLayout.connections) {
+          if (conn.type==='partner') {
+            const a=currentLayout.positions[conn.from], b=currentLayout.positions[conn.to];
+            if (!a||!b) continue;
+            const y=a.y+CARD_H/2, x1=a.x+CARD_W, x2=b.x;
+            if (Math.abs(a.y-b.y)<5) linesSvg.appendChild(line(x1,y,x2,y,'partner-line'));
+          } else if (conn.type==='parent-child') {
+            const parents = conn.parentIds.filter(pid=>currentLayout.positions[pid]);
+            const children = conn.childIds.filter(cid=>currentLayout.positions[cid]);
+            if (!parents.length||!children.length) continue;
+            const parentPositions = parents.map(pid=>currentLayout.positions[pid]);
+            const childPositions = children.map(cid=>currentLayout.positions[cid]);
+            const parentBottom = Math.max(...parentPositions.map(p=>p.y+CARD_H));
+            const childTop = Math.min(...childPositions.map(p=>p.y));
+            const midY = (parentBottom + childTop)/2;
+            const key = parentKey(parents);
+
+            if (parents.length===1) {
+              const p = parentPositions[0];
+              const px = p.x+CARD_W/2;
+              for (const cid of children) {
+                const cp = currentLayout.positions[cid];
+                if (!cp) continue;
+                const cx = cp.x+CARD_W/2;
+                linesSvg.appendChild(path(`M ${px} ${p.y+CARD_H} L ${px} ${midY} L ${cx} ${midY} L ${cx} ${cp.y}`, 'parent-line'));
+              }
+              if (!togglePositions.has(key)) {
+                togglePositions.set(key, { x: px, y: (p.y+CARD_H + midY)/2 });
+              }
+            } else if (parents.length===2) {
+              const [p1,p2] = parentPositions;
+              const arePartners = people[parents[0]]?.partnerIds.includes(parents[1]);
+              if (arePartners && Math.abs(p1.y-p2.y)<5) {
+                const partnerY = p1.y+CARD_H/2;
+                const leftX = Math.min(p1.x+CARD_W, p2.x+CARD_W);
+                const rightX = Math.max(p1.x, p2.x);
+                const midX = (leftX+rightX)/2;
+                for (const cid of children) {
+                  const cp = currentLayout.positions[cid];
+                  if (!cp) continue;
+                  const cx = cp.x+CARD_W/2;
+                  linesSvg.appendChild(path(`M ${midX} ${partnerY} L ${midX} ${midY} L ${cx} ${midY} L ${cx} ${cp.y}`, 'parent-line'));
+                }
+                if (!togglePositions.has(key)) {
+                  togglePositions.set(key, { x: midX, y: (partnerY + midY)/2 });
+                }
+              } else {
+                // two parents not partners? rare, but handle
+                const avgX = (p1.x + p2.x)/2 + CARD_W/2;
+                for (const p of parentPositions) {
+                  const px = p.x+CARD_W/2;
+                  for (const cid of children) {
+                    const cp = currentLayout.positions[cid];
+                    if (!cp) continue;
+                    const cx = cp.x+CARD_W/2;
+                    linesSvg.appendChild(path(`M ${px} ${p.y+CARD_H} L ${px} ${midY} L ${cx} ${midY} L ${cx} ${cp.y}`, 'parent-line'));
+                  }
+                }
+                if (!togglePositions.has(key)) {
+                  togglePositions.set(key, { x: avgX, y: (parentBottom + midY)/2 });
+                }
+              }
+            }
+          }
+        }
+
+        // Ensure toggle positions for all parent keys (even if children are hidden)
+        for (const key of allParentKeys) {
+          if (!togglePositions.has(key)) {
+            const parentIds = key.split('-').filter(pid => people[pid] && currentLayout.positions[pid]);
+            if (parentIds.length === 0) continue;
+            const parentPositions = parentIds.map(pid => currentLayout.positions[pid]);
+            const parentBottom = Math.max(...parentPositions.map(p => p.y + CARD_H));
+            const estimatedMidY = parentBottom + V_GAP/2;
+            if (parentIds.length === 1) {
+              const p = parentPositions[0];
+              togglePositions.set(key, { x: p.x + CARD_W/2, y: (p.y + CARD_H + estimatedMidY)/2 });
+            } else if (parentIds.length === 2) {
+              const [p1, p2] = parentPositions;
+              const arePartners = people[parentIds[0]]?.partnerIds.includes(parentIds[1]);
+              if (arePartners && Math.abs(p1.y - p2.y) < 5) {
+                const partnerY = p1.y + CARD_H/2;
+                const leftX = Math.min(p1.x + CARD_W, p2.x + CARD_W);
+                const rightX = Math.max(p1.x, p2.x);
+                const midX = (leftX + rightX)/2;
+                togglePositions.set(key, { x: midX, y: (partnerY + estimatedMidY)/2 });
+              } else {
+                const avgX = (p1.x + p2.x)/2 + CARD_W/2;
+                togglePositions.set(key, { x: avgX, y: (parentBottom + estimatedMidY)/2 });
+              }
+            }
+          }
+        }
+
+        // Draw toggle circles
+        for (const [key, pos] of togglePositions.entries()) {
+          const isCollapsed = collapsedEdges.has(key);
+          const circle = document.createElementNS(svgNs, 'circle');
+          circle.setAttribute('cx', pos.x);
+          circle.setAttribute('cy', pos.y);
+          circle.setAttribute('r', 10);
+          circle.setAttribute('class', 'edge-toggle-circle');
+          circle.setAttribute('stroke', '#555');
+          circle.setAttribute('fill', '#fff');
+          circle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleEdge(key);
+          });
+          linesSvg.appendChild(circle);
+
+          const text = document.createElementNS(svgNs, 'text');
+          text.setAttribute('x', pos.x);
+          text.setAttribute('y', pos.y);
+          text.setAttribute('class', 'edge-toggle-text');
+          text.textContent = isCollapsed ? '▶' : '▼';
+          linesSvg.appendChild(text);
+        }
+      }
+
+      function updateZoomIndicator() { zoomIndicator.textContent = Math.round(scale*100)+'%'; }
+      function applyTransform(smooth=false) {
+        if (smooth) { canvasInner.classList.add('smooth'); setTimeout(()=>canvasInner.classList.remove('smooth'),300); }
+        canvasInner.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+        updateZoomIndicator();
+      }
+
+      function zoomIn() { zoomAtPoint(canvasContainer.clientWidth/2, canvasContainer.clientHeight/2, 1.2); }
+      function zoomOut() { zoomAtPoint(canvasContainer.clientWidth/2, canvasContainer.clientHeight/2, 1/1.2); }
+      function zoomAtPoint(cx,cy,factor) {
+        const newScale = Math.min(Math.max(scale*factor,0.08),5);
+        const rect = canvasContainer.getBoundingClientRect(); const mx=cx-rect.left, my=cy-rect.top;
+        const wx=(mx-panX)/scale, wy=(my-panY)/scale;
+        panX = mx - wx*newScale; panY = my - wy*newScale;
+        scale = newScale; applyTransform();
+      }
+      function fitToScreen() {
+        const allPos = Object.values(currentLayout.positions);
+        if (!allPos.length) { resetView(); return; }
+        const minX=Math.min(...allPos.map(p=>p.x)), minY=Math.min(...allPos.map(p=>p.y));
+        const maxX=Math.max(...allPos.map(p=>p.x+CARD_W)), maxY=Math.max(...allPos.map(p=>p.y+CARD_H));
+        const cw=canvasContainer.clientWidth, ch=canvasContainer.clientHeight;
+        scale = Math.max(0.12, Math.min(cw/(maxX-minX+120), ch/(maxY-minY+120), 1.4));
+        panX = (cw - (minX+maxX)*scale)/2;
+        panY = (ch - (minY+maxY)*scale)/2;
+        applyTransform(true);
+      }
+      function resetView() {
+        scale=1; panX=0; panY=0;
+        const allPos=Object.values(currentLayout.positions);
+        if (allPos.length) {
+          const ax=allPos.reduce((s,p)=>s+p.x+CARD_W/2,0)/allPos.length, ay=allPos.reduce((s,p)=>s+p.y+CARD_H/2,0)/allPos.length;
+          panX=canvasContainer.clientWidth/2 - ax; panY=canvasContainer.clientHeight/2 - ay;
+        }
+        applyTransform(true);
+      }
+      function autoAlignTree() { renderAll(); setTimeout(fitToScreen, 100); showToast('Tree aligned'); }
+
+      canvasContainer.addEventListener('wheel', e => { e.preventDefault(); zoomAtPoint(e.clientX, e.clientY, e.deltaY<0?1.08:1/1.08); }, {passive:false});
+      canvasContainer.addEventListener('mousedown', e => { if (!e.target.closest('.person-card') && !e.target.closest('.edge-toggle-circle')) { isPanning=true; canvasContainer.classList.add('grabbing'); panStart={x:e.clientX,y:e.clientY}; panStartPan={x:panX,y:panY}; } });
+      window.addEventListener('mousemove', e => { if (isPanning) { panX=panStartPan.x+(e.clientX-panStart.x); panY=panStartPan.y+(e.clientY-panStart.y); applyTransform(); } });
+      window.addEventListener('mouseup', () => { if(isPanning) { isPanning=false; canvasContainer.classList.remove('grabbing'); } });
+      canvasContainer.addEventListener('touchstart', e => { if (e.touches.length===1 && !e.target.closest('.person-card') && !e.target.closest('.edge-toggle-circle')) { panStart={x:e.touches[0].clientX,y:e.touches[0].clientY}; panStartPan={x:panX,y:panY}; } });
+      canvasContainer.addEventListener('touchmove', e => { if (e.touches.length===1 && !e.target.closest('.person-card') && !e.target.closest('.edge-toggle-circle')) { panX=panStartPan.x+(e.touches[0].clientX-panStart.x); panY=panStartPan.y+(e.touches[0].clientY-panStart.y); applyTransform(); } }, {passive:false});
+
+      function selectPerson(id) {
+        selectedPersonId = id;
+        document.querySelectorAll('.person-card').forEach(c => {
+          const isSelected = c.dataset.personId===id;
+          c.classList.toggle('selected', isSelected);
+        });
+        if (id && sidePanel.classList.contains('open')) populateEditForm(id);
+      }
+      function deselectAll() { selectedPersonId=null; document.querySelectorAll('.person-card').forEach(c=>c.classList.remove('selected')); }
+      function openEditPanel(id) { selectPerson(id); populateEditForm(id); sidePanel.classList.add('open'); }
+      function closePanel() { sidePanel.classList.remove('open'); updatePanelDefault(); }
+      function updatePanelDefault() {
+        panelTitle.textContent='Quick Actions';
+        panelBody.innerHTML = `
+          <div class="flex flex-col items-center justify-center h-full text-center p-6 space-y-4">
+            <div class="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 mb-2 ring-1 ring-slate-100">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
+            </div>
+            <p class="text-slate-500 text-sm leading-relaxed">Select a person on the canvas to view their details, edit information, or add relationships.</p>
+            <button onclick="addRootPerson()" class="btn btn-default btn-primary w-full mt-4">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg> Add New Person
+            </button>
+          </div>`;
+      }
+      function populateEditForm(id) {
+        const p=people[id]; if(!p) return;
+        panelTitle.textContent='Edit Details';
+        
+        const inputClass = "input-field";
+        const labelClass = "label-text";
+        
+        panelBody.innerHTML = `
+          <div class="space-y-4 pb-2">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="${labelClass}">First Name</label>
+                <input type="text" id="edit-firstName" value="${escapeHtml(p.firstName)}" class="${inputClass}" placeholder="First name">
+              </div>
+              <div>
+                <label class="${labelClass}">Last Name</label>
+                <input type="text" id="edit-lastName" value="${escapeHtml(p.lastName)}" class="${inputClass}" placeholder="Last name">
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="${labelClass}">Maiden Name</label>
+                <input type="text" id="edit-maidenName" value="${escapeHtml(p.maidenName)}" class="${inputClass}" placeholder="Maiden name">
+              </div>
+              <div>
+                <label class="${labelClass}">Nickname</label>
+                <input type="text" id="edit-nickname" value="${escapeHtml(p.nickname || '')}" class="${inputClass}" placeholder="Nickname">
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="${labelClass}">Date of Birth</label>
+                <input type="date" id="edit-dateOfBirth" value="${escapeHtml(p.dateOfBirth)}" class="${inputClass}">
+              </div>
+              <div>
+                <label class="${labelClass}">Gender</label>
+                <select id="edit-gender" class="${inputClass}">
+                  <option value="male" ${p.gender==='male'?'selected':''}>Male</option>
+                  <option value="female" ${p.gender==='female'?'selected':''}>Female</option>
+                  <option value="other" ${p.gender==='other'?'selected':''}>Other</option>
+                </select>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 mt-1">
+              <input type="checkbox" id="edit-isDeceased" class="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900" ${p.isDeceased ? 'checked' : ''} onchange="document.getElementById('deathDateContainer').classList.toggle('hidden', !this.checked)">
+              <label for="edit-isDeceased" class="text-sm font-medium text-slate-900 cursor-pointer select-none">Mark as Deceased</label>
+            </div>
+            <div id="deathDateContainer" class="${p.isDeceased ? '' : 'hidden'}">
+              <label class="${labelClass}">Date of Death</label>
+              <input type="date" id="edit-dateOfDeath" value="${escapeHtml(p.dateOfDeath)}" class="${inputClass}">
+            </div>
+            <div>
+              <label class="${labelClass}">Profession</label>
+              <input type="text" id="edit-profession" value="${escapeHtml(p.profession)}" class="${inputClass}" placeholder="Profession">
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="${labelClass}">City</label>
+                <input type="text" id="edit-city" value="${escapeHtml(p.city)}" class="${inputClass}" placeholder="City">
+              </div>
+              <div>
+                <label class="${labelClass}">Country</label>
+                <input type="text" id="edit-country" value="${escapeHtml(p.country)}" class="${inputClass}" placeholder="Country">
+              </div>
+            </div>
+            <div>
+              <label class="${labelClass}">Photo</label>
+              <div class="relative">
+                <input type="text" id="edit-imageUrl" value="${escapeHtml(p.imageUrl)}" class="${inputClass} pr-9" placeholder="Paste image URL or Google Drive link..." oninput="window._previewPhoto(this.value)" onpaste="setTimeout(() => window._previewPhoto(this.value), 50)">
+                <div class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                </div>
+              </div>
+              <div id="photo-preview-container" class="mt-2 ${p.imageUrl ? '' : 'hidden'}">
+                <div class="relative rounded-lg overflow-hidden border border-slate-200 bg-slate-50 w-[180px] h-[180px]">
+                  <img id="photo-preview-img" src="${escapeHtml(p.imageUrl ? normalizeImageUrl(p.imageUrl) : '')}" class="w-full h-full object-cover object-center" onerror="this.parentElement.innerHTML='<div class=\'flex items-center justify-center w-full h-full text-slate-400 text-xs text-center p-4\'>Image could not be loaded. Check the URL or sharing permissions.</div>'">
+                </div>
+                <div id="photo-gdrive-badge" class="${isGoogleDriveUrl(p.imageUrl) ? 'flex' : 'hidden'} items-center gap-1.5 mt-1.5 px-2 py-1 bg-blue-50 border border-blue-100 rounded-md">
+                  <svg class="w-3.5 h-3.5 text-blue-600 shrink-0" viewBox="0 0 24 24" fill="currentColor"><path d="M7.71 3.5L1.15 15l3.43 5.99L11.14 9.49 7.71 3.5zm8.56 0H7.71l6.56 11.49h8.57L16.27 3.5zM1.15 15l3.43 6h13.72l3.43-6H1.15z"/></svg>
+                  <span class="text-[11px] text-blue-700 font-medium">Google Drive link auto-converted for embedding</span>
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1.5 leading-relaxed">Supports public URLs or <span class="font-medium text-slate-500">Google Drive</span> share links (File → Share → Copy link).</p>
+            </div>
+          </div>
+          
+          <div class="flex gap-2 pt-4 border-t border-slate-100 mt-4">
+            <button class="btn btn-default btn-primary flex-1" onclick="savePersonEdit('${id}')">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Save Changes
+            </button>
+            <button class="btn btn-default btn-destructive-ghost px-3" onclick="deletePersonConfirm('${id}')" title="Delete Person">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            </button>
+          </div>
+          
+          <div class="mt-4 pt-5 border-t border-slate-100">
+            <h4 class="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">Add Relationship</h4>
+            <div class="flex flex-col gap-2">
+              <button class="flex items-center justify-between w-full h-10 px-4 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-700 transition-colors group" onclick="addPartnerFor('${id}')">
+                <div class="flex items-center gap-2"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg> Add Partner</div>
+                <svg class="w-4 h-4 text-slate-300 group-hover:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </button>
+              <button class="flex items-center justify-between w-full h-10 px-4 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-700 transition-colors group" onclick="showAddChildOptions('${id}')">
+                <div class="flex items-center gap-2"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg> Add Child</div>
+                <svg class="w-4 h-4 text-slate-300 group-hover:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </button>
+              <button class="flex items-center justify-between w-full h-10 px-4 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-700 transition-colors group" onclick="addParentFor('${id}')">
+                <div class="flex items-center gap-2"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path></svg> Add Parent</div>
+                <svg class="w-4 h-4 text-slate-300 group-hover:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </button>
+              ${p.childIds.filter(cid=>people[cid]).length > 1 ? `
+              <button class="flex items-center justify-between w-full h-10 px-4 bg-white border border-slate-200 hover:bg-slate-50 rounded-md text-sm font-medium text-slate-700 transition-colors group mt-2" onclick="showReorderChildren('${id}')">
+                <div class="flex items-center gap-2"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg> Reorder Children</div>
+                <svg class="w-4 h-4 text-slate-300 group-hover:text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+              </button>
+              ` : ''}
+            </div>
+          </div>`;
+        sidePanel.classList.add('open');
+      }
+
+      window.showAddChildOptions = function(id) {
+        const p = people[id]; if(!p) return;
+        const partners = p.partnerIds.filter(pid=>people[pid]);
+        panelTitle.textContent='Add Child';
+        
+        let html = `<div class="mb-4">
+          <p class="text-sm text-slate-500 leading-relaxed mb-3">Choose how to link the new child to <span class="font-semibold text-slate-700">${escapeHtml([p.firstName,p.lastName].filter(Boolean).join(' ')||'Unnamed')}</span>.</p>
+          <div class="flex flex-col gap-2.5">`;
+          
+        const btnClass = "w-full p-3 bg-white border border-slate-200 hover:bg-slate-50 hover:shadow-sm rounded-md text-left transition-colors group";
+        
+        html += `<button class="${btnClass}" onclick="addChildWithNewPartner('${id}')">
+          <div class="font-medium text-sm text-slate-900 flex items-center gap-2 mb-1"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg> Child with a NEW Partner</div>
+          <div class="text-xs text-slate-500 leading-relaxed ml-6">Creates a new partner and links the child to both.</div>
+        </button>`;
+        
+        html += `<button class="${btnClass}" onclick="addChildSingleParent('${id}')">
+          <div class="font-medium text-sm text-slate-900 flex items-center gap-2 mb-1"><svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg> Single-parent Child</div>
+          <div class="text-xs text-slate-500 leading-relaxed ml-6">Child linked only to this person.</div>
+        </button>`;
+        
+        if (partners.length > 0) {
+          for (const pid of partners) {
+            const pp=people[pid]; const name=[pp.firstName,pp.lastName].filter(Boolean).join(' ')||'Unnamed';
+            html += `<button class="${btnClass}" onclick="addChildWithExistingPartner('${id}','${pid}')">
+              <div class="font-medium text-sm text-slate-900 flex items-center gap-2 mb-1"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"></path></svg> Child with ${escapeHtml(name)}</div>
+              <div class="text-xs text-slate-500 leading-relaxed ml-6">Child linked to both of you.</div>
+            </button>`;
+          }
+        }
+        
+        html += `</div></div>
+        <div class="mt-auto pt-4 border-t border-slate-100">
+          <button class="btn btn-default btn-outline w-full" onclick="goBackToEdit('${id}')">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> Back to Edit
+          </button>
+        </div>`;
+        panelBody.innerHTML = html;
+        sidePanel.classList.add('open');
+      };
+      window.addChildWithNewPartner = (id) => { const partner=createPerson({firstName:'Partner'}); addPartnerRelationship(id,partner.id); const child=createPerson({firstName:'Child'}); addChildToParents(child.id,[id,partner.id]); renderAll(); selectPerson(child.id); openEditPanel(child.id); showToast('Child with new partner added'); };
+      window.addChildSingleParent = (id) => { const child=createPerson({firstName:'Child'}); addChildToParents(child.id,[id]); renderAll(); selectPerson(child.id); openEditPanel(child.id); showToast('Single-parent child added'); };
+      window.addChildWithExistingPartner = (id,pid) => { const child=createPerson({firstName:'Child'}); addChildToParents(child.id,[id,pid]); renderAll(); selectPerson(child.id); openEditPanel(child.id); showToast('Child with existing partner added'); };
+      
+      window.showReorderChildren = function(id) {
+        const p = people[id]; if(!p) return;
+        const validChildren = p.childIds.filter(cid => people[cid]);
+        if(validChildren.length < 2) return;
+        
+        panelTitle.textContent = 'Reorder Children';
+        
+        let html = `<div class="mb-4">
+          <p class="text-sm text-slate-500 leading-relaxed mb-3">Drag and drop the cards below to change the birth order of <span class="font-semibold text-slate-700">${escapeHtml([p.firstName,p.lastName].filter(Boolean).join(' ')||'Unnamed')}</span>'s children.</p>
+          <div class="flex flex-col gap-2" id="reorder-children-list">`;
+          
+        html += validChildren.map((cid, idx) => {
+          const cp = people[cid];
+          const name = escapeHtml([cp.firstName, cp.lastName].filter(Boolean).join(' ') || 'Unnamed');
+          return `
+            <div data-id="${cid}" class="p-3 bg-white border border-slate-200 rounded-lg cursor-grab active:cursor-grabbing mb-2 flex items-center gap-3 hover:bg-slate-50 transition-colors shadow-sm">
+              <svg class="w-5 h-5 text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"></path></svg>
+              <div class="font-medium text-sm text-slate-700 select-none pointer-events-none">${name}</div>
+            </div>
+          `;
+        }).join('');
+        
+        html += `</div></div>
+        <div class="mt-auto pt-4 border-t border-slate-100">
+          <button class="btn btn-default btn-outline w-full" onclick="goBackToEdit('${id}')">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> Back to Edit
+          </button>
+        </div>`;
+        panelBody.innerHTML = html;
+        sidePanel.classList.add('open');
+        
+        // Initialize SortableJS for flawless UX
+        const capturedParentId = id;
+        new Sortable(document.getElementById('reorder-children-list'), {
+            animation: 150,
+            ghostClass: 'opacity-40',
+            dragClass: 'scale-95',
+            onEnd: function(evt) {
+                if (evt.oldIndex !== evt.newIndex) {
+                    window.moveChild(capturedParentId, evt.oldIndex, evt.newIndex);
+                }
+            }
+        });
+      };
+
+      window.moveChild = function(parentId, fromIdx, toIdx) {
+        fromIdx = parseInt(fromIdx, 10);
+        toIdx   = parseInt(toIdx, 10);
+        if (isNaN(fromIdx) || isNaN(toIdx) || fromIdx === toIdx) return;
+        
+        const p = people[parentId]; if(!p) return;
+        
+        // Build ordered list of valid children
+        const validChildren = p.childIds.filter(cid => people[cid]);
+        
+        // Splice in-place
+        const [item] = validChildren.splice(fromIdx, 1);
+        validChildren.splice(toIdx, 0, item);
+        
+        // Write back to parent
+        p.childIds = validChildren;
+        
+        // Sync the other parent (partner) to the same order
+        const validChildrenStrs = validChildren.map(String);
+        const allPartnersToUpdate = new Set();
+        for (const cid of validChildren) {
+          (people[cid].parentIds || []).forEach(pid => { 
+            if (String(pid) !== String(parentId)) allPartnersToUpdate.add(pid); 
+          });
+        }
+        for (const pid of allPartnersToUpdate) {
+          if (!people[pid]) continue;
+          people[pid].childIds = [...people[pid].childIds].sort((a, b) => {
+            const idxA = validChildrenStrs.indexOf(String(a));
+            const idxB = validChildrenStrs.indexOf(String(b));
+            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+            return 0;
+          });
+        }
+
+        saveToLocalStorage();
+        renderAll();
+        showReorderChildren(parentId);
+      };
+
+      window._previewPhoto = function(rawUrl) {
+        const container = document.getElementById('photo-preview-container');
+        const img = document.getElementById('photo-preview-img');
+        const badge = document.getElementById('photo-gdrive-badge');
+        if (!container) return;
+        const url = rawUrl?.trim();
+        if (!url) {
+          container.classList.add('hidden');
+          return;
+        }
+        container.classList.remove('hidden');
+        const resolved = normalizeImageUrl(url);
+        // Reset preview container in case it was replaced with error div
+        const previewWrapper = container.querySelector('.relative');
+        if (previewWrapper && !previewWrapper.querySelector('img')) {
+          previewWrapper.innerHTML = `<img id="photo-preview-img" src="" class="w-full h-full object-cover object-center" onerror="this.parentElement.innerHTML='<div class=\\'flex items-center justify-center w-full h-full text-slate-400 text-xs text-center p-4\\'>Image could not be loaded. Check the URL or sharing permissions.</div>'">`;
+        }
+        const currentImg = container.querySelector('img');
+        if (currentImg) currentImg.src = resolved;
+        if (badge) {
+          if (isGoogleDriveUrl(url)) badge.classList.remove('hidden');
+          else badge.classList.add('hidden');
+          badge.classList.toggle('flex', isGoogleDriveUrl(url));
+        }
+      };
+
+      window.goBackToEdit = (id) => populateEditForm(id);
+
+      window.savePersonEdit = (id) => {
+        const p=people[id]; if(!p) return;
+        p.firstName = toTitleCase(document.getElementById('edit-firstName')?.value||'');
+        p.lastName = toTitleCase(document.getElementById('edit-lastName')?.value||'');
+        p.maidenName = toTitleCase(document.getElementById('edit-maidenName')?.value||'');
+        p.nickname = toTitleCase(document.getElementById('edit-nickname')?.value||'');
+        p.dateOfBirth = document.getElementById('edit-dateOfBirth')?.value||'';
+        p.isDeceased = document.getElementById('edit-isDeceased')?.checked||false;
+        p.dateOfDeath = document.getElementById('edit-dateOfDeath')?.value||'';
+        p.gender = document.getElementById('edit-gender')?.value||'other';
+        p.profession = document.getElementById('edit-profession')?.value||'';
+        p.city = toTitleCase(document.getElementById('edit-city')?.value||'');
+        p.country = toTitleCase(document.getElementById('edit-country')?.value||'');
+        p.imageUrl = normalizeImageUrl(document.getElementById('edit-imageUrl')?.value||'');
+        renderAll(); selectPerson(id); openEditPanel(id); showToast('Person updated');
+      };
+      window.deletePersonConfirm = (id) => {
+        if (confirm('Delete this person and all their relationships?')) { removePerson(id); if(selectedPersonId===id) selectedPersonId=null; closePanel(); renderAll(); showToast('Person deleted'); }
+      };
+      window.addPartnerFor = (id) => { const p=createPerson({firstName:'Partner'}); addPartnerRelationship(id,p.id); renderAll(); selectPerson(p.id); openEditPanel(p.id); showToast('Partner added'); };
+      window.addParentFor = (id) => {
+        const p=people[id]; if(p.parentIds.filter(pid=>people[pid]).length>0) { showToast('Already has parents'); return; }
+        const father=createPerson({firstName:'Father', gender:'male'}); 
+        const mother=createPerson({firstName:'Mother', gender:'female'});
+        addPartnerRelationship(father.id, mother.id);
+        addChildToParents(id, [father.id, mother.id]); 
+        renderAll(); selectPerson(father.id); openEditPanel(father.id); showToast('Parents added');
+      };
+      window.addRootPerson = () => { const p=createPerson({firstName:'New Person'}); renderAll(); selectPerson(p.id); openEditPanel(p.id); showToast('New person added'); };
+
+      window.expandAll = () => {
+        collapsedEdges.clear();
+        renderAll();
+        showToast('All branches expanded');
+      };
+      window.collapseAll = () => {
+        const allKeys = getAllParentKeys();
+        collapsedEdges = new Set(allKeys);
+        renderAll();
+        showToast('All branches collapsed');
+      };
+
+      window.exportImage = () => {
+        const allPos = Object.values(currentLayout.positions);
+        if (!allPos.length) { showToast('Tree is empty'); return; }
+        
+        const minX = Math.min(...allPos.map(p => p.x));
+        const minY = Math.min(...allPos.map(p => p.y));
+        const maxX = Math.max(...allPos.map(p => p.x + 200));
+        const maxY = Math.max(...allPos.map(p => p.y + 240));
+        
+        const padding = 100;
+        const width = maxX - minX + padding * 2;
+        const height = maxY - minY + padding * 2;
+        
+        showToast('Generating HD image...');
+        
+        const prevSelected = selectedPersonId;
+        if (prevSelected) deselectAll();
+        
+        document.querySelectorAll('.edge-toggle-circle').forEach(el => el.style.opacity = '0');
+        document.querySelectorAll('.edge-toggle-text').forEach(el => el.style.opacity = '0');
+        
+        htmlToImage.toPng(document.getElementById('canvas-inner'), {
+            width: width,
+            height: height,
+            backgroundColor: '#f8fafc',
+            fontEmbedCSS: '',
+            imagePlaceholder: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+            style: {
+                transform: `translate(${-minX + padding}px, ${-minY + padding}px) scale(1)`,
+                transformOrigin: 'top left',
+                width: `${width}px`,
+                height: `${height}px`
+            },
+            pixelRatio: 2 // High definition
+        })
+        .then(function (dataUrl) {
+            const link = document.createElement('a');
+            link.download = 'family-tree.png';
+            link.href = dataUrl;
+            link.click();
+            showToast('Image exported successfully');
+        })
+        .catch(function (error) {
+            console.error('Error generating image!', error);
+            showToast('Failed to generate image');
+        })
+        .finally(() => {
+            if (prevSelected) selectPerson(prevSelected);
+            document.querySelectorAll('.edge-toggle-circle').forEach(el => el.style.opacity = '1');
+            document.querySelectorAll('.edge-toggle-text').forEach(el => el.style.opacity = '1');
+        });
+      };
+
+      window.exportJSON = () => {
+        const data = {
+          version: 2,
+          nextId,
+          people: Object.values(people).map(p => ({...p, partnerIds:[...p.partnerIds], parentIds:[...p.parentIds], childIds:[...p.childIds]})),
+          collapsedEdges: [...collapsedEdges]
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'family-tree.json';
+        a.click();
+        showToast('Exported');
+      };
+
+      window.importJSON = (event) => {
+        const file = event.target.files[0]; if(!file) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const data = JSON.parse(e.target.result);
+            if (!data.people) throw new Error();
+            people = {}; nextId = data.nextId || 1;
+            const idMap = {};
+            let maxId = 0;
+            for (const pd of data.people) {
+              const np = createPerson({...pd, partnerIds:pd.partnerIds||[], parentIds:pd.parentIds||[], childIds:pd.childIds||[]});
+              idMap[pd.id] = np.id;
+              const idNum = parseInt(np.id.replace('p_', ''), 10);
+              if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+            }
+            if (nextId <= maxId) nextId = maxId + 1;
+            for (const [,nid] of Object.entries(idMap)) {
+              const p = people[nid]; if(!p) continue;
+              p.partnerIds = p.partnerIds.map(oid => idMap[oid] || oid).filter(oid => people[oid]);
+              p.parentIds = p.parentIds.map(oid => idMap[oid] || oid).filter(oid => people[oid]);
+              p.childIds = p.childIds.map(oid => idMap[oid] || oid).filter(oid => people[oid]);
+            }
+            collapsedEdges = new Set(data.collapsedEdges || []);
+            selectedPersonId = null; closePanel(); renderAll(); fitToScreen(); showToast('Imported');
+          } catch { showToast('❌ Invalid file'); }
+        };
+        reader.readAsText(file);
+        event.target.value = '';
+      };
+
+      window.clearAll = () => {
+        if (confirm('Clear entire tree?')) { people = {}; nextId = 1; selectedPersonId = null; collapsedEdges.clear(); closePanel(); renderAll(); resetView(); showToast('Cleared'); }
+      };
+
+      function saveToLocalStorage() {
+        try {
+          localStorage.setItem('family-tree', JSON.stringify({
+            people: Object.values(people).map(p => ({...p})),
+            nextId,
+            collapsedEdges: [...collapsedEdges],
+            view: { scale, panX, panY }
+          }));
+        } catch {}
+      }
+
+      function loadFromStorage() {
+        try {
+          const raw = localStorage.getItem('family-tree'); if (!raw) return false;
+          const data = JSON.parse(raw); if (!data.people) return false;
+          people = {}; nextId = data.nextId || 1;
+          const idMap = {};
+          let maxId = 0;
+          for (const pd of data.people) { 
+            const np = createPerson({...pd}); 
+            idMap[pd.id] = np.id; 
+            const idNum = parseInt(np.id.replace('p_', ''), 10);
+            if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+          }
+          if (nextId <= maxId) nextId = maxId + 1;
+          for (const [,nid] of Object.entries(idMap)) {
+            const p = people[nid]; if (!p) continue;
+            p.partnerIds = p.partnerIds.map(oid => idMap[oid] || oid).filter(oid => people[oid]);
+            p.parentIds = p.parentIds.map(oid => idMap[oid] || oid).filter(oid => people[oid]);
+            p.childIds = p.childIds.map(oid => idMap[oid] || oid).filter(oid => people[oid]);
+          }
+          collapsedEdges = new Set(data.collapsedEdges || []);
+          if (data.view) { scale = data.view.scale || 1; panX = data.view.panX || 0; panY = data.view.panY || 0; }
+          return true;
+        } catch { return false; }
+      }
+
+      window.addEventListener('keydown', e => {
+        if (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT') return;
+        if (e.key==='Escape') { deselectAll(); closePanel(); }
+        if ((e.key==='Delete'||e.key==='Backspace') && selectedPersonId && !sidePanel.classList.contains('open')) {
+          if (confirm('Delete selected?')) { removePerson(selectedPersonId); selectedPersonId=null; renderAll(); showToast('Deleted'); }
+        }
+        if ((e.ctrlKey||e.metaKey) && e.key==='f') { e.preventDefault(); fitToScreen(); }
+      });
+      canvasContainer.addEventListener('click', e => {
+        if (e.target===canvasContainer||e.target===canvasInner||e.target===linesSvg) { if(!isPanning) deselectAll(); }
+      });
+
+      function init() {
+        if (!loadFromStorage()) {
+          createPerson({ firstName:'John', lastName:'Doe', gender:'male', dateOfBirth:'1980-01-15', profession:'Developer' });
+        }
+        renderAll();
+        applyTransform();
+        updatePanelDefault();
+        updateZoomIndicator();
+        if (!loadFromStorage()) setTimeout(fitToScreen, 200);
+      }
+
+      window.zoomIn = zoomIn; window.zoomOut = zoomOut; window.fitToScreen = fitToScreen; window.resetView = resetView;
+      window.autoAlignTree = autoAlignTree; window.closePanel = closePanel;
+      if (document.readyState==='loading') document.addEventListener('DOMContentLoaded', init);
+      else init();
+    })();
+  </script>
+</body>
+</html>
