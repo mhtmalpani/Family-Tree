@@ -1318,7 +1318,7 @@
         applyTransform();
         updatePanelDefault();
         updateZoomIndicator();
-        if (!loadFromStorage()) setTimeout(fitToScreen, 200);
+        setTimeout(autoAlignTree, 100);
       }
 
       window.zoomIn = zoomIn; window.zoomOut = zoomOut; window.fitToScreen = fitToScreen; window.resetView = resetView;
