@@ -102,6 +102,11 @@
     <button onclick="collapseAll()" class="btn btn-default btn-ghost text-slate-600">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg> Collapse All
     </button>
+    <button id="btn-auto-focus" onclick="toggleAutoFocus()" class="btn btn-default btn-ghost text-slate-600" title="Auto focus on expand (on)">
+      <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+      </svg> Auto Focus
+    </button>
     <div class="w-px h-6 bg-slate-200 mx-1 shrink-0"></div>
     <button onclick="exportJSON()" class="btn btn-default btn-ghost text-slate-600">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Export
@@ -142,6 +147,7 @@
       const CARD_W = 200, CARD_H = 320, H_GAP = 50, V_GAP = 80;
       let people = {}, nextId = 1, selectedPersonId = null;
       let collapsedEdges = new Set();
+      let autoFocusOnExpand = true;
       let scale = 1, panX = 0, panY = 0, isPanning = false, panStart = { x:0, y:0 }, panStartPan = { x:0, y:0 };
       let currentLayout = { positions:{}, connections:[], generation:{} };
 
@@ -291,19 +297,94 @@
         return result;
       }
 
+      function focusOnEdge(key) {
+        const parentIds = key.split('-').filter(pid => people[pid]);
+        if (parentIds.length === 0) return;
+
+        // Collect all visible children that belong to this parent set
+        const children = new Set();
+        for (const pid of parentIds) {
+          for (const cid of people[pid].childIds) {
+            if (!people[cid]) continue;
+            const cidParentIds = people[cid].parentIds.filter(p => people[p]);
+            const cidParentKey = parentKey(cidParentIds);
+            if (cidParentKey === key && currentLayout.positions[cid]) {
+              children.add(cid);
+            }
+          }
+        }
+
+        // Nodes to fit: the parents and their (now visible) children
+        const nodes = [...parentIds.filter(id => currentLayout.positions[id]), ...children];
+        if (nodes.length === 0) return;
+
+        const positions = nodes.map(id => currentLayout.positions[id]);
+        const minX = Math.min(...positions.map(p => p.x));
+        const minY = Math.min(...positions.map(p => p.y));
+        const maxX = Math.max(...positions.map(p => p.x + CARD_W));
+        const maxY = Math.max(...positions.map(p => p.y + CARD_H));
+
+        const cw = canvasContainer.clientWidth;
+        const ch = canvasContainer.clientHeight;
+        const padding = 80;
+        const width = maxX - minX + padding * 2;
+        const height = maxY - minY + padding * 2;
+
+        // Fit the cluster in the viewport, capped at 1.4× zoom to avoid over‑enlarging
+        const scaleX = cw / width;
+        const scaleY = ch / height;
+        let newScale = Math.min(scaleX, scaleY, 1.4);
+        newScale = Math.max(0.12, newScale);   // same lower limit as fitToScreen
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        panX = cw / 2 - centerX * newScale;
+        panY = ch / 2 - centerY * newScale;
+        scale = newScale;
+
+        applyTransform(true);   // smooth transition
+      }
+
       // toggle an edge: collapse/expand, and when collapsing, recursively collapse all descendants
       function toggleEdge(key) {
         if (collapsedEdges.has(key)) {
-          // expanding this edge: remove it from collapsedEdges, descendants remain as they were
           collapsedEdges.delete(key);
+          renderAll();
+          if (autoFocusOnExpand) focusOnEdge(key);
         } else {
-          // collapsing: add this key and all descendant keys
           collapsedEdges.add(key);
           const descendants = getDescendantEdgeKeys(key);
           for (const dk of descendants) collapsedEdges.add(dk);
+          renderAll();
         }
-        renderAll();
       }
+
+      function toggleAutoFocus() {
+        autoFocusOnExpand = !autoFocusOnExpand;
+        const btn = document.getElementById('btn-auto-focus');
+        if (!btn) return;
+
+        const icon = btn.querySelector('svg');
+        if (autoFocusOnExpand) {
+          btn.title = 'Auto focus on expand (on)';
+          btn.classList.add('text-slate-900');
+          btn.classList.remove('text-slate-400');
+          if (icon) {
+            icon.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>';
+            icon.setAttribute('fill', 'currentColor');
+          }
+        } else {
+          btn.title = 'Auto focus on expand (off)';
+          btn.classList.add('text-slate-400');
+          btn.classList.remove('text-slate-900');
+          if (icon) {
+            icon.innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/>';
+            icon.setAttribute('fill', 'currentColor');
+          }
+        }
+      }
+
+      window.toggleAutoFocus = toggleAutoFocus;
 
       function getVisibleIds() {
         const visible = new Set();
@@ -1315,6 +1396,12 @@
           createPerson({ firstName:'John', lastName:'Doe', gender:'male', dateOfBirth:'1980-01-15', profession:'Developer' });
         }
         renderAll();
+        // Set initial auto‑focus button state to match the default (enabled)
+        const btn = document.getElementById('btn-auto-focus');
+        if (btn) {
+          btn.classList.add('text-slate-900');
+          btn.querySelector('svg').innerHTML = '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>';
+        }
         applyTransform();
         updatePanelDefault();
         updateZoomIndicator();
