@@ -345,6 +345,44 @@
         applyTransform(true);   // smooth transition
       }
 
+      function focusOnPerson(personId) {
+        const pos = currentLayout.positions[personId];
+        if (!pos) return;
+
+        const padding = 100;
+        const nodeW = CARD_W;
+        const nodeH = CARD_H;
+
+        let cw = canvasContainer.clientWidth;
+        let ch = canvasContainer.clientHeight;
+
+        // If the side panel is open, reduce the available width
+        if (sidePanel.classList.contains('open')) {
+          cw -= sidePanel.offsetWidth;
+        }
+
+        const minX = pos.x - padding;
+        const minY = pos.y - padding;
+        const maxX = pos.x + nodeW + padding;
+        const maxY = pos.y + nodeH + padding;
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        let newScale = Math.min(cw / width, ch / height, 1.4);
+        newScale = Math.max(0.12, newScale);
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+
+        // Center in the available area (left part when panel is open)
+        panX = cw / 2 - centerX * newScale;
+        panY = ch / 2 - centerY * newScale;
+        scale = newScale;
+
+        applyTransform(true);
+      }
+
       // toggle an edge: collapse/expand, and when collapsing, recursively collapse all descendants
       function toggleEdge(key) {
         if (collapsedEdges.has(key)) {
@@ -1080,9 +1118,38 @@
         panelBody.innerHTML = html;
         sidePanel.classList.add('open');
       };
-      window.addChildWithNewPartner = (id) => { const partner=createPerson({firstName:'Partner'}); addPartnerRelationship(id,partner.id); const child=createPerson({firstName:'Child'}); addChildToParents(child.id,[id,partner.id]); renderAll(); selectPerson(child.id); openEditPanel(child.id); showToast('Child with new partner added'); };
-      window.addChildSingleParent = (id) => { const child=createPerson({firstName:'Child'}); addChildToParents(child.id,[id]); renderAll(); selectPerson(child.id); openEditPanel(child.id); showToast('Single-parent child added'); };
-      window.addChildWithExistingPartner = (id,pid) => { const child=createPerson({firstName:'Child'}); addChildToParents(child.id,[id,pid]); renderAll(); selectPerson(child.id); openEditPanel(child.id); showToast('Child with existing partner added'); };
+
+      window.addChildWithNewPartner = (id) => {
+        const partner = createPerson({ firstName: 'Partner' });
+        addPartnerRelationship(id, partner.id);
+        const child = createPerson({ firstName: 'Child' });
+        addChildToParents(child.id, [id, partner.id]);
+        renderAll();
+        selectPerson(child.id);
+        openEditPanel(child.id);
+        if (autoFocusOnExpand) focusOnPerson(child.id);
+        showToast('Child with new partner added');
+      };
+
+      window.addChildSingleParent = (id) => {
+        const child = createPerson({ firstName: 'Child' });
+        addChildToParents(child.id, [id]);
+        renderAll();
+        selectPerson(child.id);
+        openEditPanel(child.id);
+        if (autoFocusOnExpand) focusOnPerson(child.id);
+        showToast('Single-parent child added');
+      };
+
+      window.addChildWithExistingPartner = (id, pid) => {
+        const child = createPerson({ firstName: 'Child' });
+        addChildToParents(child.id, [id, pid]);
+        renderAll();
+        selectPerson(child.id);
+        openEditPanel(child.id);
+        if (autoFocusOnExpand) focusOnPerson(child.id);
+        showToast('Child with existing partner added');
+      };    
       
       window.showReorderChildren = function(id) {
         const p = people[id]; if(!p) return;
@@ -1216,16 +1283,42 @@
       window.deletePersonConfirm = (id) => {
         if (confirm('Delete this person and all their relationships?')) { removePerson(id); if(selectedPersonId===id) selectedPersonId=null; closePanel(); renderAll(); showToast('Person deleted'); }
       };
-      window.addPartnerFor = (id) => { const p=createPerson({firstName:'Partner'}); addPartnerRelationship(id,p.id); renderAll(); selectPerson(p.id); openEditPanel(p.id); showToast('Partner added'); };
+
+      window.addPartnerFor = (id) => {
+        const p = createPerson({ firstName: 'Partner' });
+        addPartnerRelationship(id, p.id);
+        renderAll();
+        selectPerson(p.id);
+        openEditPanel(p.id);
+        if (autoFocusOnExpand) focusOnPerson(p.id);
+        showToast('Partner added');
+      };  
+      
       window.addParentFor = (id) => {
-        const p=people[id]; if(p.parentIds.filter(pid=>people[pid]).length>0) { showToast('Already has parents'); return; }
-        const father=createPerson({firstName:'Father', gender:'male'}); 
-        const mother=createPerson({firstName:'Mother', gender:'female'});
+        const p = people[id];
+        if (p.parentIds.filter(pid => people[pid]).length > 0) {
+          showToast('Already has parents');
+          return;
+        }
+        const father = createPerson({ firstName: 'Father', gender: 'male' });
+        const mother = createPerson({ firstName: 'Mother', gender: 'female' });
         addPartnerRelationship(father.id, mother.id);
-        addChildToParents(id, [father.id, mother.id]); 
-        renderAll(); selectPerson(father.id); openEditPanel(father.id); showToast('Parents added');
+        addChildToParents(id, [father.id, mother.id]);
+        renderAll();
+        selectPerson(father.id);
+        openEditPanel(father.id);
+        if (autoFocusOnExpand) focusOnPerson(father.id);
+        showToast('Parents added');
       };
-      window.addRootPerson = () => { const p=createPerson({firstName:'New Person'}); renderAll(); selectPerson(p.id); openEditPanel(p.id); showToast('New person added'); };
+      
+      window.addRootPerson = () => {
+        const p = createPerson({ firstName: 'New Person' });
+        renderAll();
+        selectPerson(p.id);
+        openEditPanel(p.id);
+        if (autoFocusOnExpand) focusOnPerson(p.id);
+        showToast('New person added');
+      };
 
       window.expandAll = () => {
         collapsedEdges.clear();
