@@ -601,7 +601,61 @@
         function layoutCluster(clusterId, startX, y) {
           const cl = clusters[clusterId];
           if (!cl) return { width: 0 };
-          const memberList = [...cl.members];
+          // Order members to minimize partner line crossing
+          let orderedMembers = [];
+          const unplaced = new Set(cl.members);
+          
+          while (unplaced.size > 0) {
+            let startNode = null;
+            let minPartners = Infinity;
+            let minAvgChildIdx = Infinity;
+            for (const m of unplaced) {
+               let pCount = 0;
+               for (const p of people[m].partnerIds) {
+                 if (unplaced.has(p)) pCount++;
+               }
+               if (pCount <= minPartners) {
+                 let avgChildIdx = 0;
+                 let childCount = 0;
+                 for (const cid of people[m].childIds) {
+                   if (visibleIds.has(cid)) {
+                     const pids = people[cid].parentIds.filter(p => visibleIds.has(p));
+                     const partner = pids.find(p => p !== m);
+                     if (partner && people[partner] && people[partner].childIds) {
+                       const idx = people[partner].childIds.indexOf(String(cid));
+                       if (idx !== -1) {
+                         avgChildIdx += idx;
+                         childCount++;
+                       }
+                     }
+                   }
+                 }
+                 if (childCount > 0) avgChildIdx /= childCount;
+                 else avgChildIdx = 0;
+
+                 if (pCount < minPartners || (pCount === minPartners && avgChildIdx < minAvgChildIdx)) {
+                   minPartners = pCount;
+                   minAvgChildIdx = avgChildIdx;
+                   startNode = m;
+                 }
+               }
+            }
+            
+            let current = startNode;
+            while (current) {
+              orderedMembers.push(current);
+              unplaced.delete(current);
+              let next = null;
+              for (const p of people[current].partnerIds) {
+                if (unplaced.has(p)) {
+                  next = p;
+                  break;
+                }
+              }
+              current = next;
+            }
+          }
+          const memberList = orderedMembers;
           const ownWidth = memberList.length * (CARD_W + H_GAP) - H_GAP;
           const childGroupKeys = new Set();
           for (const m of memberList) {
@@ -642,6 +696,29 @@
           }
           let childX = centerX - childrenTotalWidth/2;
           const childY = y + CARD_H + V_GAP;
+          
+          // Sort child groups by the average index of their parents to prevent crossed lines,
+          // prioritizing the dragged order defined in the common parent's childIds.
+          childLayouts.sort((a, b) => {
+            const pidsA = a.key.split('-');
+            const pidsB = b.key.split('-');
+            const common = pidsA.find(p => pidsB.includes(p));
+            if (common && people[common] && people[common].childIds) {
+               const cidsA = parentSetToChildren[a.key] || [];
+               const cidsB = parentSetToChildren[b.key] || [];
+               const avgA = cidsA.reduce((sum, cid) => sum + people[common].childIds.indexOf(String(cid)), 0) / (cidsA.length || 1);
+               const avgB = cidsB.reduce((sum, cid) => sum + people[common].childIds.indexOf(String(cid)), 0) / (cidsB.length || 1);
+               return avgA - avgB;
+            }
+            const getAvgIdx = (key) => {
+              const pids = key.split('-').filter(pid => visibleIds.has(pid));
+              if (pids.length === 0) return 0;
+              const sum = pids.reduce((acc, pid) => acc + memberList.indexOf(pid), 0);
+              return sum / pids.length;
+            };
+            return getAvgIdx(a.key) - getAvgIdx(b.key);
+          });
+
           for (const group of childLayouts) {
             let innerX = childX;
             for (const sub of group.groupLayouts) {
@@ -773,8 +850,12 @@
           if (conn.type==='partner') {
             const a=currentLayout.positions[conn.from], b=currentLayout.positions[conn.to];
             if (!a||!b) continue;
-            const y=a.y+CARD_H/2, x1=a.x+CARD_W, x2=b.x;
-            if (Math.abs(a.y-b.y)<5) linesSvg.appendChild(line(x1,y,x2,y,'partner-line'));
+            const leftCard = a.x < b.x ? a : b;
+            const rightCard = a.x < b.x ? b : a;
+            const y = leftCard.y + CARD_H/2;
+            const x1 = leftCard.x + CARD_W;
+            const x2 = rightCard.x;
+            if (Math.abs(leftCard.y-rightCard.y)<5) linesSvg.appendChild(line(x1,y,x2,y,'partner-line'));
           } else if (conn.type==='parent-child') {
             const parents = conn.parentIds.filter(pid=>currentLayout.positions[pid]);
             const children = conn.childIds.filter(cid=>currentLayout.positions[cid]);
@@ -1156,10 +1237,92 @@
         const validChildren = p.childIds.filter(cid => people[cid]);
         if(validChildren.length < 2) return;
         
+        // Group children by their other parent
+        const groups = {};
+        for (const cid of validChildren) {
+           const cp = people[cid];
+           const otherParents = cp.parentIds.filter(pid => pid !== id && people[pid]);
+           const groupKey = otherParents.sort().join('-') || 'single';
+           if (!groups[groupKey]) groups[groupKey] = [];
+           groups[groupKey].push(cid);
+        }
+        
+        const reorderableKeys = Object.keys(groups).filter(k => groups[k].length > 1);
+        if (reorderableKeys.length === 0) {
+           showToast('Not enough children to reorder in any group.');
+           return;
+        }
+        
+        // If only one group can be reordered, skip selection
+        if (reorderableKeys.length === 1) {
+           showReorderChildrenList(id, reorderableKeys[0], true);
+           return;
+        }
+        
+        panelTitle.textContent = 'Reorder Children';
+        let html = `<div class="mb-4">
+          <p class="text-sm text-slate-500 leading-relaxed mb-3">Which children would you like to reorder for <span class="font-semibold text-slate-700">${escapeHtml([p.firstName,p.lastName].filter(Boolean).join(' ')||'Unnamed')}</span>?</p>
+          <div class="flex flex-col gap-2">`;
+          
+        const btnClass = "p-3 bg-white border border-slate-200 rounded-lg text-left hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-1";
+        
+        for (const key of reorderableKeys) {
+           const cids = groups[key];
+           if (key === 'single') {
+             html += `<button class="${btnClass}" onclick="showReorderChildrenList('${id}', 'single')">
+               <div class="font-medium text-sm text-slate-900 flex items-center gap-2 mb-1">Single Parent Children</div>
+               <div class="text-xs text-slate-500 leading-relaxed ml-2">${cids.length} children</div>
+             </button>`;
+           } else {
+             const otherParentIds = key.split('-');
+             const names = otherParentIds.map(pid => {
+               const pp = people[pid];
+               return [pp.firstName, pp.lastName].filter(Boolean).join(' ') || 'Unnamed';
+             }).join(', ');
+             html += `<button class="${btnClass}" onclick="showReorderChildrenList('${id}', '${key}')">
+               <div class="font-medium text-sm text-slate-900 flex items-center gap-2 mb-1"><svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg> Children with ${escapeHtml(names)}</div>
+               <div class="text-xs text-slate-500 leading-relaxed ml-6">${cids.length} children</div>
+             </button>`;
+           }
+        }
+        
+        html += `</div></div>
+        <div class="mt-auto pt-4 border-t border-slate-100">
+          <button class="btn btn-default btn-outline w-full" onclick="goBackToEdit('${id}')">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> Back to Edit
+          </button>
+        </div>`;
+        panelBody.innerHTML = html;
+        sidePanel.classList.add('open');
+      };
+
+      window.showReorderChildrenList = function(id, groupKey, isDirect = false) {
+        const p = people[id]; if(!p) return;
+        
+        const validChildren = p.childIds.filter(cid => {
+           if (!people[cid]) return false;
+           const cp = people[cid];
+           const otherParents = cp.parentIds.filter(pid => pid !== id && people[pid]);
+           const key = otherParents.sort().join('-') || 'single';
+           return key === groupKey;
+        });
+        
+        if (validChildren.length < 2) return;
+        
         panelTitle.textContent = 'Reorder Children';
         
+        let groupDesc = "Single Parent Children";
+        if (groupKey !== 'single') {
+            const names = groupKey.split('-').map(pid => {
+               const pp = people[pid];
+               return [pp.firstName, pp.lastName].filter(Boolean).join(' ') || 'Unnamed';
+            }).join(', ');
+            groupDesc = `Children with ${names}`;
+        }
+        
         let html = `<div class="mb-4">
-          <p class="text-sm text-slate-500 leading-relaxed mb-3">Drag and drop the cards below to change the birth order of <span class="font-semibold text-slate-700">${escapeHtml([p.firstName,p.lastName].filter(Boolean).join(' ')||'Unnamed')}</span>'s children.</p>
+          <p class="text-sm text-slate-500 leading-relaxed mb-1">Reordering <span class="font-semibold text-slate-700">${escapeHtml(groupDesc)}</span></p>
+          <p class="text-xs text-slate-400 mb-3">Drag and drop the cards below to change the birth order.</p>
           <div class="flex flex-col gap-2" id="reorder-children-list">`;
           
         html += validChildren.map((cid, idx) => {
@@ -1173,16 +1336,18 @@
           `;
         }).join('');
         
+        const backAction = isDirect ? `goBackToEdit('${id}')` : `showReorderChildren('${id}')`;
+        
         html += `</div></div>
         <div class="mt-auto pt-4 border-t border-slate-100">
-          <button class="btn btn-default btn-outline w-full" onclick="goBackToEdit('${id}')">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> Back to Edit
+          <button class="btn btn-default btn-outline w-full" onclick="${backAction}">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> Back
           </button>
         </div>`;
         panelBody.innerHTML = html;
         sidePanel.classList.add('open');
         
-        // Initialize SortableJS for flawless UX
+        // Initialize SortableJS
         const capturedParentId = id;
         new Sortable(document.getElementById('reorder-children-list'), {
             animation: 150,
@@ -1190,50 +1355,63 @@
             dragClass: 'scale-95',
             onEnd: function(evt) {
                 if (evt.oldIndex !== evt.newIndex) {
-                    window.moveChild(capturedParentId, evt.oldIndex, evt.newIndex);
+                    window.moveChildSubset(capturedParentId, groupKey, validChildren, evt.oldIndex, evt.newIndex, isDirect);
                 }
             }
         });
       };
 
-      window.moveChild = function(parentId, fromIdx, toIdx) {
+      window.moveChildSubset = function(parentId, groupKey, subset, fromIdx, toIdx, isDirect) {
         fromIdx = parseInt(fromIdx, 10);
         toIdx   = parseInt(toIdx, 10);
         if (isNaN(fromIdx) || isNaN(toIdx) || fromIdx === toIdx) return;
         
         const p = people[parentId]; if(!p) return;
         
-        // Build ordered list of valid children
-        const validChildren = p.childIds.filter(cid => people[cid]);
+        // Splice subset in-place
+        const newSubset = [...subset];
+        const [item] = newSubset.splice(fromIdx, 1);
+        newSubset.splice(toIdx, 0, item);
         
-        // Splice in-place
-        const [item] = validChildren.splice(fromIdx, 1);
-        validChildren.splice(toIdx, 0, item);
+        // Find original indices of the subset in p.childIds
+        const indices = subset.map(cid => p.childIds.indexOf(cid)).sort((a,b) => a-b);
+        
+        // Replace them in p.childIds
+        const newChildIds = [...p.childIds];
+        indices.forEach((idx, i) => {
+          if (idx !== -1) newChildIds[idx] = newSubset[i];
+        });
         
         // Write back to parent
-        p.childIds = validChildren;
+        p.childIds = newChildIds;
         
         // Sync the other parent (partner) to the same order
-        const validChildrenStrs = validChildren.map(String);
         const allPartnersToUpdate = new Set();
-        for (const cid of validChildren) {
+        for (const cid of newSubset) {
           (people[cid].parentIds || []).forEach(pid => { 
             if (String(pid) !== String(parentId)) allPartnersToUpdate.add(pid); 
           });
         }
         for (const pid of allPartnersToUpdate) {
           if (!people[pid]) continue;
-          people[pid].childIds = [...people[pid].childIds].sort((a, b) => {
-            const idxA = validChildrenStrs.indexOf(String(a));
-            const idxB = validChildrenStrs.indexOf(String(b));
-            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
-            return 0;
+          
+          const partnerChildIds = [...people[pid].childIds];
+          const partnerIndices = newSubset.map(cid => partnerChildIds.indexOf(cid))
+                                          .filter(idx => idx !== -1)
+                                          .sort((a, b) => a - b);
+          
+          const relevantNewSubset = newSubset.filter(cid => partnerChildIds.includes(cid));
+          
+          partnerIndices.forEach((idx, i) => {
+            partnerChildIds[idx] = relevantNewSubset[i];
           });
+          
+          people[pid].childIds = partnerChildIds;
         }
 
         saveToLocalStorage();
         renderAll();
-        showReorderChildren(parentId);
+        showReorderChildrenList(parentId, groupKey, isDirect);
       };
 
       window._previewPhoto = function(rawUrl) {
